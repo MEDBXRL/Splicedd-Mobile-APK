@@ -1,0 +1,147 @@
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod files;
+mod mobile;
+mod updater;
+
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+// Splice's GraphQL endpoint sits behind Cloudflare Bot Management, which rejects
+// any client whose TLS/HTTP2 fingerprint isn't a real browser (Tauri's built-in
+// HTTP client included). The only thing Cloudflare reliably accepts is an actual
+// browser, and a browser fetch also needs to run from an origin Splice's CORS
+// allows -- which is splice.com itself.
+//
+// So we spawn a hidden webview pointed at splice.com. Once it has passed
+// Cloudflare's browser check, it can `fetch()` the GraphQL endpoint same-site,
+// and it relays requests/responses to and from the main window over Tauri events.
+// See `capabilities/splice-helper.json` for the (event-only) permissions this
+// remote webview is granted.
+const SPLICE_HELPER_LABEL: &str = "splice-helper";
+const SPLICE_HELPER_URL: &str = "https://splice.com/sounds/search/samples";
+
+const SPLICE_HELPER_INIT: &str = r#"
+(function () {
+  if (window.__spliceHelperReady) return;
+  window.__spliceHelperReady = true;
+
+  var GRAPHQL_URL = "https://surfaces-graphql.splice.com/graphql";
+
+  // Tauri reliably injects __TAURI_INTERNALS__ into capability-granted remote
+  // pages, but the high-level window.__TAURI__ global may not be present. Prefer
+  // the global when available; otherwise build a minimal emit/listen on top of
+  // the internals (the same commands the high-level API uses).
+  function getEventApi() {
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      return window.__TAURI__.event;
+    }
+    var internals = window.__TAURI_INTERNALS__;
+    if (!internals || !internals.invoke || !internals.transformCallback) {
+      return null;
+    }
+    return {
+      emit: function (event, payload) {
+        return internals.invoke("plugin:event|emit", { event: event, payload: payload });
+      },
+      listen: function (event, handler) {
+        return internals.invoke("plugin:event|listen", {
+          event: event,
+          target: { kind: "Any" },
+          handler: internals.transformCallback(handler)
+        });
+      }
+    };
+  }
+
+  function start() {
+    var event = getEventApi();
+    if (!event) { setTimeout(start, 100); return; }
+
+    event.listen("splice-search", async function (msg) {
+      var id = msg.payload.id;
+      var body = msg.payload.body;
+      var lastErr = null;
+
+      // Cloudflare clearance can take a moment after the page loads, so retry
+      // a few times before giving up.
+      for (var attempt = 0; attempt < 4; attempt++) {
+        try {
+          var resp = await fetch(GRAPHQL_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: body
+          });
+          var text = await resp.text();
+          if (resp.ok) {
+            event.emit("splice-result", { id: id, ok: true, body: text });
+            return;
+          }
+          lastErr = "Splice returned HTTP " + resp.status;
+        } catch (e) {
+          lastErr = String(e);
+        }
+        await new Promise(function (r) { setTimeout(r, 700); });
+      }
+
+      event.emit("splice-result", { id: id, ok: false, error: lastErr || "unknown error" });
+    });
+  }
+
+  start();
+})();
+"#;
+
+pub fn run() {
+    // WebKitGTK's DMA-BUF renderer fails on many Linux GPU setups (notably NVIDIA
+    // and some Wayland compositors), leaving the window completely blank. Fall
+    // back to the older renderer unless the user has explicitly chosen otherwise.
+    // This must happen before any threads are spawned (set_var isn't thread-safe).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_shell::init());
+
+    // Drag plugin is desktop-only (not supported on Android/iOS) - controlled by build.rs cfg
+    #[cfg(drag_plugin)]
+    {
+        builder = builder.plugin(tauri_plugin_drag::init());
+    }
+        .setup(|app| {
+            // Create this before the frontend starts. The config loader and
+            // writer can then safely access config.json through the fs plugin.
+            std::fs::create_dir_all(app.path().app_config_dir()?)?;
+
+            WebviewWindowBuilder::new(
+                app,
+                SPLICE_HELPER_LABEL,
+                WebviewUrl::External(SPLICE_HELPER_URL.parse().unwrap()),
+            )
+            .title("splice-helper")
+            .visible(false)
+            .skip_taskbar(true)
+            .initialization_script(SPLICE_HELPER_INIT)
+            .build()?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            files::write_sample_file,
+            files::file_exists,
+            files::dir_exists,
+            files::create_placeholder_file,
+            updater::fetch_releases,
+            updater::install_update,
+            mobile::get_download_dir,
+            mobile::download_sample,
+            mobile::download_pack,
+            mobile::open_download_folder,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

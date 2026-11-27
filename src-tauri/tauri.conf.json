@@ -1,0 +1,66 @@
+{
+  "productName": "splicedd",
+  "version": "2.1.1",
+  "identifier": "dev.ascpixi.splicedd",
+  "build": {
+    "beforeDevCommand": "yarn dev",
+    "beforeBuildCommand": "yarn build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Splicedd",
+        "width": 1200,
+        "height": 600,
+        "minWidth": 980,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "android": {
+      "minSdkVersion": 24
+    },
+    "iOS": {
+      "minimumSystemVersion": "16.0"
+    }
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": [
+          "$DOWNLOAD/*",
+          "$DOCUMENT/*",
+          "$APPDATA/*"
+        ]
+      }
+    },
+    "http": {
+      "scope": {
+        "allow": [
+          "https://surfaces-graphql.splice.com/**",
+          "https://splice.com/**",
+          "https://*.splice.com/**"
+        ]
+      }
+    }
+  }
+}

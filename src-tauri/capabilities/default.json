@@ -1,0 +1,42 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Splicedd",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default",
+    "drag:default",
+    "notification:default",
+    "opener:default",
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/**" }]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "$APPCONFIG/**" }]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "$APPCONFIG/**" }]
+    },
+    {
+      "identifier": "fs:allow-create-dir",
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$DOWNLOAD/**" }, { "path": "$DOCUMENT/**" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://spliceproduction.s3.*.amazonaws.com/**" },
+        { "url": "https://*.amazonaws.com/spliceblob.splice.com/**" },
+        { "url": "https://*.splice.com/**" },
+        { "url": "https://surfaces-graphql.splice.com/**" }
+      ]
+    }
+  ]
+}
